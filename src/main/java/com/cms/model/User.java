@@ -36,16 +36,17 @@ public class User {
 
     public String toJson() {
         return "{"
-            + "\"id\":"          + q(id)           + ","
-            + "\"fullName\":"    + q(fullName)      + ","
-            + "\"email\":"       + q(email)         + ","
-            + "\"role\":"        + q(role)          + ","
-            + "\"avatarUrl\":"   + q(avatarUrl)     + ","
-            + "\"bio\":"         + q(bio)           + ","
-            + "\"isActive\":"    + isActive         + ","
-            + "\"lastLoginAt\":" + q(lastLoginAt)   + ","
-            + "\"createdAt\":"   + q(createdAt)     + ","
-            + "\"updatedAt\":"   + q(updatedAt)
+            + "\"id\":"            + q(id)             + ","
+            + "\"fullName\":"      + q(fullName)        + ","
+            + "\"email\":"         + q(email)           + ","
+            + "\"passwordHash\":"  + q(passwordHash)    + ","
+            + "\"role\":"          + q(role)            + ","
+            + "\"avatarUrl\":"     + q(avatarUrl)       + ","
+            + "\"bio\":"           + q(bio)             + ","
+            + "\"isActive\":"      + isActive           + ","
+            + "\"lastLoginAt\":"   + q(lastLoginAt)     + ","
+            + "\"createdAt\":"     + q(createdAt)       + ","
+            + "\"updatedAt\":"     + q(updatedAt)
             + "}";
     }
 
