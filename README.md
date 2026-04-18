@@ -1,457 +1,307 @@
 # Headless CMS — UCSal
 
-A lightweight, zero-dependency Headless CMS REST API built with pure Java 21 and PostgreSQL. Developed for the Universidade Católica do Salvador (UCSal) to manage academic content: courses, professors, news, articles, projects, and events.
+API REST para gerenciamento de conteúdo acadêmico da Universidade Católica do Salvador.
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Linguagem | Java 21 |
+| HTTP Server | `com.sun.net.httpserver` (nativo do JDK) |
+| Banco de dados | PostgreSQL 15+ |
+| Driver JDBC | `org.postgresql:postgresql:42.7.3` |
+| Build | Maven 3 |
 
 ---
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Layers Explained](#layers-explained)
-- [Database Schema](#database-schema)
-- [API Reference](#api-reference)
-- [Setup & Running](#setup--running)
-- [Request & Response Examples](#request--response-examples)
-
----
-
-## Overview
-
-This project is a **Headless CMS**, meaning it exposes a JSON REST API with no frontend attached. Any client (web app, mobile app, or another service) can consume the API to read and write content.
-
-**Key design decisions:**
-- No frameworks (no Spring, no Quarkus) — uses only the Java Standard Library's built-in `HttpServer`
-- No ORM — uses plain JDBC with `PreparedStatement` for all database operations
-- Single external dependency: the PostgreSQL JDBC driver
-
----
-
-## Architecture
-
-The application follows a classic **3-layer architecture**:
-
-```
-HTTP Request
-     │
-     ▼
-┌─────────────┐
-│   Handler   │  ← Receives HTTP, parses JSON, returns HTTP response
-│  (Layer 1)  │
-└──────┬──────┘
-       │ calls
-       ▼
-┌─────────────┐
-│ Repository  │  ← Executes SQL queries against PostgreSQL
-│  (Layer 2)  │
-└──────┬──────┘
-       │ uses
-       ▼
-┌─────────────┐
-│    Model    │  ← Plain Java objects (POJOs) that represent data
-│  (Layer 3)  │
-└─────────────┘
-```
-
-Each layer has a single responsibility:
-- **Handler** — HTTP concerns only (routing, status codes, JSON in/out)
-- **Repository** — Database concerns only (SQL, result mapping)
-- **Model** — Data structure only (fields, serialization to JSON)
-
----
-
-## Project Structure
+## Arquitetura
 
 ```
 src/main/java/com/cms/
-│
-├── App.java                          # Entry point — boots the server
-│
+├── App.java                    → entry point, sobe o HttpServer
 ├── db/
-│   └── Database.java                 # PostgreSQL connection singleton
-│
+│   └── Database.java           → singleton de conexão PostgreSQL
 ├── server/
-│   ├── Router.java                   # Maps URL paths → Handlers
-│   └── JsonUtil.java                 # JSON read/write/escape helpers
-│
-├── model/
-│   ├── enums/
-│   │   ├── UserRole.java             # admin | editor | professor | student | viewer
-│   │   ├── ContentStatus.java        # draft | in_review | published | archived
-│   │   ├── EventModality.java        # presencial | online | hibrido
-│   │   └── SemesterPeriod.java       # S1 ("1") | S2 ("2")
-│   │
-│   ├── User.java
-│   ├── Course.java
-│   ├── Professor.java
-│   ├── Discipline.java
-│   ├── DisciplineOffering.java
-│   ├── Category.java
-│   ├── Tag.java
-│   ├── News.java
-│   ├── Article.java
-│   ├── Project.java
-│   ├── Event.java
-│   ├── FileEntity.java               # Named FileEntity to avoid collision with java.io.File
-│   └── AuditLog.java
-│
-├── repository/
+│   ├── Router.java             → registro centralizado de rotas
+│   └── JsonUtil.java           → serialização JSON + CORS
+├── handler/                    → camada HTTP (recebe request, devolve response)
+│   ├── UserHandler.java
+│   ├── CourseHandler.java
+│   ├── NewsHandler.java
+│   ├── ArticleHandler.java
+│   ├── ProjectHandler.java
+│   ├── EventHandler.java
+│   └── ContentHandler.java
+├── repository/                 → camada de dados (SQL via JDBC)
 │   ├── UserRepository.java
 │   ├── CourseRepository.java
 │   ├── NewsRepository.java
 │   ├── ArticleRepository.java
 │   ├── ProjectRepository.java
 │   └── EventRepository.java
-│
-└── handler/
-    ├── UserHandler.java
-    ├── CourseHandler.java
-    ├── NewsHandler.java
-    ├── ArticleHandler.java
-    ├── ProjectHandler.java
-    └── EventHandler.java
+└── model/                      → entidades e enums de domínio
+    ├── User.java
+    ├── Course.java
+    ├── News.java
+    ├── Article.java
+    ├── Project.java
+    ├── Event.java
+    └── enums/
+        ├── UserRole.java       → admin | editor | professor | student | viewer
+        ├── ContentStatus.java  → draft | in_review | published | archived
+        ├── EventModality.java  → presencial | online | hibrido
+        └── SemesterPeriod.java
+```
+
+### Fluxo de uma requisição
+
+```
+Cliente HTTP
+    │
+    ▼
+HttpServer (porta 8080)
+    │
+    ▼
+Router → registra cada path em seu Handler
+    │
+    ▼
+Handler → parse JSON → chama Repository
+    │
+    ▼
+Repository → PreparedStatement → PostgreSQL
+    │
+    ▼
+Handler → JsonUtil.sendJson() → resposta HTTP
 ```
 
 ---
 
-## Layers Explained
+## Endpoints
 
-### `App.java` — Entry Point
-
-Starts the application in three steps:
-1. Calls `Database.testConnection()` to validate the PostgreSQL connection — **fails fast** if the DB is unreachable
-2. Creates a `HttpServer` on port `8080`
-3. Delegates route registration to `Router` and starts listening
-
-### `Router.java` — Route Table
-
-Registers each URL prefix with its corresponding handler using `server.createContext(path, handler)`. The `HttpServer` routes any request whose path *starts with* the registered prefix to that handler.
-
-```
-/api/users    → UserHandler
-/api/courses  → CourseHandler
-/api/news     → NewsHandler
-/api/articles → ArticleHandler
-/api/projects → ProjectHandler
-/api/events   → EventHandler
-/health       → inline lambda
-```
-
-### `Database.java` — Connection
-
-A simple factory that opens a new JDBC connection per request. Configuration comes from environment variables:
-
-| Variable      | Default                                      |
-|---------------|----------------------------------------------|
-| `DB_URL`      | `jdbc:postgresql://localhost:5432/ucsal_cms` |
-| `DB_USER`     | `postgres`                                   |
-| `DB_PASSWORD` | `postgres`                                   |
-
-> **Usage pattern:** every repository uses `try-with-resources` to guarantee the connection is closed after each query.
-
-### `JsonUtil.java` — JSON Utilities
-
-Since there is no JSON library, this class handles all JSON I/O manually:
-
-| Method             | Purpose                                           |
-|--------------------|---------------------------------------------------|
-| `sendJson`         | Writes a JSON string as an HTTP response body     |
-| `sendError`        | Writes `{"error":"..."}` with a given status code |
-| `readBody`         | Reads the raw request body as a String            |
-| `extractField`     | Extracts a single string value from a JSON string |
-| `escapeJson`       | Escapes `"`, `\`, `\n`, `\r`, `\t` in strings    |
-| `setCorsHeaders`   | Adds CORS headers to allow browser clients        |
-
-> **Limitation:** `extractField` only handles flat string fields. Nested objects or arrays must be handled separately.
-
-### Models — POJOs
-
-Each model class represents one database table. All models follow the same pattern:
-
-```java
-// 1. Auto-generate ID and timestamps in the default constructor
-public User() {
-    this.id        = UUID.randomUUID().toString();
-    this.createdAt = Instant.now().toString();
-    this.updatedAt = this.createdAt;
-}
-
-// 2. toJson() serializes the object to a JSON string manually
-public String toJson() { ... }
-
-// 3. Private helper q() handles null-safe JSON string quoting
-private static String q(Object v) {
-    if (v == null) return "null";
-    return "\"" + JsonUtil.escapeJson(v.toString()) + "\"";
-}
-```
-
-### Repositories — Data Access
-
-Each repository follows the same CRUD structure:
-
-| Method          | SQL operation             |
-|-----------------|---------------------------|
-| `findAll()`     | `SELECT ... ORDER BY ...` |
-| `findById(id)`  | `SELECT ... WHERE id=?`   |
-| `findBySlug(s)` | `SELECT ... WHERE slug=?` |
-| `save(entity)`  | `INSERT ... RETURNING id` |
-| `update(entity)`| `UPDATE ... WHERE id=?`   |
-| `delete(id)`    | `DELETE WHERE id=?`       |
-
-PostgreSQL ENUMs are cast explicitly in SQL using `?::user_role`, `?::content_status`, etc. UUIDs are cast with `?::uuid`.
-
-The `RETURNING id, created_at, updated_at` clause on `INSERT` lets the repository populate the generated fields back onto the Java object without a second query.
-
-### Handlers — HTTP Controllers
-
-Each handler implements `HttpHandler` and follows the same flow:
-
-```
-1. Set CORS headers
-2. If OPTIONS → respond 204 (preflight)
-3. Read method (GET/POST/PUT/DELETE)
-4. Extract ID from path (if present)
-5. Dispatch to the right private method
-6. Catch all exceptions → 500 Internal Server Error
-```
-
-The ID is extracted from the URL path by splitting on `/`:
-- `/api/news`      → `parts[2] = "news"` → no ID
-- `/api/news/{id}` → `parts[3] = "{id}"` → ID present
+| Método | Path | Descrição |
+|---|---|---|
+| GET | `/health` | Verifica se o servidor está no ar |
+| GET | `/api/users` | Lista todos os usuários |
+| POST | `/api/users` | Cria um usuário |
+| PUT | `/api/users/{id}` | Atualiza um usuário |
+| DELETE | `/api/users/{id}` | Remove um usuário |
+| GET | `/api/courses` | Lista todos os cursos |
+| POST | `/api/courses` | Cria um curso |
+| PUT | `/api/courses/{id}` | Atualiza um curso |
+| DELETE | `/api/courses/{id}` | Remove um curso |
+| GET | `/api/news` | Lista todas as notícias |
+| POST | `/api/news` | Cria uma notícia |
+| PUT | `/api/news/{id}` | Atualiza uma notícia |
+| DELETE | `/api/news/{id}` | Remove uma notícia |
+| GET | `/api/articles` | Lista todos os artigos |
+| POST | `/api/articles` | Cria um artigo |
+| PUT | `/api/articles/{id}` | Atualiza um artigo |
+| DELETE | `/api/articles/{id}` | Remove um artigo |
+| GET | `/api/projects` | Lista todos os projetos |
+| POST | `/api/projects` | Cria um projeto |
+| PUT | `/api/projects/{id}` | Atualiza um projeto |
+| DELETE | `/api/projects/{id}` | Remove um projeto |
+| GET | `/api/events` | Lista todos os eventos |
+| POST | `/api/events` | Cria um evento |
+| PUT | `/api/events/{id}` | Atualiza um evento |
+| DELETE | `/api/events/{id}` | Remove um evento |
 
 ---
 
-## Database Schema
+## Variáveis de ambiente
 
-The PostgreSQL schema (`Anotacao.java`) defines **11 main tables** and **~10 junction tables**:
+Copie `.env.example` para `.env` e preencha os valores:
 
-### ENUMs
+```bash
+cp .env.example .env
+```
 
-| Type              | Values                                              |
-|-------------------|-----------------------------------------------------|
-| `user_role`       | `admin`, `editor`, `professor`, `student`, `viewer` |
-| `content_status`  | `draft`, `in_review`, `published`, `archived`       |
-| `event_modality`  | `presencial`, `online`, `hibrido`                   |
-| `semester_period` | `'1'`, `'2'`                                        |
-
-### Main Tables
-
-| Table                  | Description                                         |
-|------------------------|-----------------------------------------------------|
-| `users`                | All system users — authentication + profile         |
-| `courses`              | Academic courses (graduation/postgraduate)          |
-| `professors`           | Academic profile extending `users`                  |
-| `disciplines`          | Course subjects/classes                             |
-| `discipline_offerings` | Which professor teaches which subject in which term |
-| `categories`           | Hierarchical content categories (parent/child)      |
-| `tags`                 | Free-form content tags                              |
-| `news`                 | University news posts                               |
-| `articles`             | Academic publications/blog posts                    |
-| `projects`             | Research and extension projects                     |
-| `events`               | Lectures, seminars, academic weeks                  |
-| `files`                | Centralized file/media repository                   |
-| `audit_logs`           | Action trail — who did what and when                |
-
-### Junction Tables (N:N relationships)
-
-| Table                 | Connects               |
-|-----------------------|------------------------|
-| `professor_courses`   | professors ↔ courses   |
-| `course_disciplines`  | courses ↔ disciplines  |
-| `news_tags`           | news ↔ tags            |
-| `news_categories`     | news ↔ categories      |
-| `news_files`          | news ↔ files           |
-| `article_authors`     | articles ↔ users       |
-| `article_tags`        | articles ↔ tags        |
-| `article_categories`  | articles ↔ categories  |
-| `article_files`       | articles ↔ files       |
-| `project_members`     | projects ↔ users       |
-| `project_tags`        | projects ↔ tags        |
-| `project_files`       | projects ↔ files       |
-| `event_tags`          | events ↔ tags          |
-| `event_files`         | events ↔ files         |
-| `discipline_files`    | disciplines ↔ files    |
-
-### Auto-update Trigger
-
-A PostgreSQL trigger (`trg_<table>_updated_at`) automatically sets `updated_at = NOW()` on every `UPDATE` across all main tables. This means the application never needs to manually set `updated_at` when updating a record.
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `DB_URL` | `jdbc:postgresql://localhost:5432/ucsal_cms` | URL de conexão JDBC |
+| `DB_USER` | `postgres` | Usuário do banco |
+| `DB_PASSWORD` | `postgres` | Senha do banco |
+| `CORS_ORIGIN` | `*` | Origem permitida pelo CORS (ex: `https://app.netlify.app`) |
 
 ---
 
-## API Reference
+## Rodando localmente
 
-All endpoints return `application/json`. All request bodies must be `application/json`.
-
-### Health Check
-
-```
-GET /health
-→ 200 {"status":"ok"}
-```
-
-### Users — `/api/users`
-
-| Method | Path             | Description          | Required fields                        |
-|--------|------------------|----------------------|----------------------------------------|
-| GET    | `/api/users`     | List all users       | —                                      |
-| GET    | `/api/users/{id}`| Get user by ID       | —                                      |
-| POST   | `/api/users`     | Create user          | `fullName`, `email`, `passwordHash`    |
-| PUT    | `/api/users/{id}`| Update user          | any of: `fullName`, `avatarUrl`, `bio`, `role` |
-| DELETE | `/api/users/{id}`| Delete user          | —                                      |
-
-### Courses — `/api/courses`
-
-| Method | Path               | Required fields    |
-|--------|--------------------|--------------------|
-| GET    | `/api/courses`     | —                  |
-| GET    | `/api/courses/{id}`| —                  |
-| POST   | `/api/courses`     | `name`, `slug`     |
-| PUT    | `/api/courses/{id}`| any field          |
-| DELETE | `/api/courses/{id}`| —                  |
-
-### News — `/api/news`
-
-| Method | Path             | Notes                                    |
-|--------|------------------|------------------------------------------|
-| GET    | `/api/news`      | Optional query: `?status=published`      |
-| GET    | `/api/news/{id}` | —                                        |
-| POST   | `/api/news`      | Required: `title`, `slug`, `body`, `authorId` |
-| PUT    | `/api/news/{id}` | any field                                |
-| DELETE | `/api/news/{id}` | —                                        |
-
-### Articles — `/api/articles`
-
-Same structure as News. Required on POST: `title`, `slug`, `body`, `authorId`.
-
-Optional query on GET: `?status=published`
-
-### Projects — `/api/projects`
-
-Same structure. Required on POST: `title`, `slug`, `description`.
-
-### Events — `/api/events`
-
-Same structure. Required on POST: `title`, `slug`, `description`, `startsAt`.
-
-### Status Codes
-
-| Code | Meaning                              |
-|------|--------------------------------------|
-| 200  | OK                                   |
-| 201  | Created                              |
-| 204  | No Content (CORS preflight)          |
-| 400  | Bad Request (missing required field) |
-| 404  | Not Found                            |
-| 405  | Method Not Allowed                   |
-| 500  | Internal Server Error                |
-
----
-
-## Setup & Running
-
-### Prerequisites
+### Pré-requisitos
 
 - Java 21+
 - Maven 3.6+
-- PostgreSQL 14+
+- PostgreSQL rodando localmente
 
-### 1. Create the database
+### Banco de dados
 
 ```sql
 CREATE DATABASE ucsal_cms;
-\c ucsal_cms
--- run the full schema from Anotacao.java
+CREATE USER cms_user WITH ENCRYPTED PASSWORD 'senha';
+GRANT ALL PRIVILEGES ON DATABASE ucsal_cms TO cms_user;
 ```
 
-### 2. Configure environment variables
+### Subindo a API
 
 ```bash
+# Compilar e empacotar
+mvn clean package -DskipTests
+
+# Definir variáveis de ambiente e subir
 export DB_URL=jdbc:postgresql://localhost:5432/ucsal_cms
-export DB_USER=postgres
-export DB_PASSWORD=your_password
+export DB_USER=cms_user
+export DB_PASSWORD=senha
+export CORS_ORIGIN=http://localhost:4200
+
+java -jar target/headless-cms-0.0.1-SNAPSHOT.jar
 ```
 
-### 3. Build and run
-
-```bash
-mvn compile exec:java
-```
-
-The server starts on `http://localhost:8080`.
+A API ficará disponível em `http://localhost:8080`.
 
 ---
 
-## Request & Response Examples
+## Deploy — KVM Hostinger (Produção)
 
-### Create a course
+### Arquitetura de produção
 
-```http
-POST /api/courses
-Content-Type: application/json
-
-{
-  "name": "Ciência da Computação",
-  "slug": "ciencia-da-computacao",
-  "code": "CC-001",
-  "durationSemesters": "8"
-}
+```
+Usuário (navegador)
+       │
+       ▼
+  Netlify CDN
+  (Angular — estático)
+       │ HTTPS requests para /api/*
+       ▼
+  Nginx (KVM Hostinger)
+  porta 443 → proxy_pass → 127.0.0.1:8080
+       │
+       ▼
+  Java HttpServer (JAR)
+       │
+       ▼
+  PostgreSQL (local na KVM)
 ```
 
-```json
-HTTP/1.1 201 Created
+### Arquivos de deploy
 
-{
-  "id": "3f2a1b4c-...",
-  "name": "Ciência da Computação",
-  "slug": "ciencia-da-computacao",
-  "code": "CC-001",
-  "description": null,
-  "durationSemesters": 8,
-  "coordinatorId": null,
-  "isActive": true,
-  "createdAt": "2026-04-04T12:00:00Z",
-  "updatedAt": "2026-04-04T12:00:00Z"
-}
+```
+deploy/
+├── setup.sh            → instala Java, PostgreSQL, Nginx, Certbot
+├── postgres-setup.sql  → cria banco e usuário
+├── nginx.conf          → configuração do reverse proxy + HTTPS
+└── cms.service         → serviço systemd para o JAR
 ```
 
-### Create a news post
+### Passo a passo na KVM
 
-```http
-POST /api/news
-Content-Type: application/json
+#### 1. Setup inicial (execute uma vez)
 
-{
-  "title": "Semana de TI 2026",
-  "slug": "semana-de-ti-2026",
-  "body": "A UCSal realiza a Semana de TI com palestras e workshops.",
-  "authorId": "user-uuid-here",
-  "status": "published"
-}
+```bash
+# Na KVM, como root:
+bash deploy/setup.sh
 ```
 
-### Filter published news
+#### 2. Banco de dados
 
-```http
-GET /api/news?status=published
+```bash
+# Edite a senha antes de executar:
+nano deploy/postgres-setup.sql
+
+sudo -u postgres psql -f deploy/postgres-setup.sql
 ```
 
-### Update a project status
+#### 3. Build e cópia do JAR
 
-```http
-PUT /api/projects/some-uuid
-Content-Type: application/json
+```bash
+# Na sua máquina local:
+mvn clean package -DskipTests
 
-{
-  "status": "published"
-}
+# Copiar para a KVM:
+scp target/headless-cms-0.0.1-SNAPSHOT.jar ubuntu@SEU_IP:/opt/cms/headless-cms.jar
 ```
 
-### Delete a user
+#### 4. Serviço systemd
 
-```http
-DELETE /api/users/some-uuid
+```bash
+# Edite com seus valores reais (DB_PASSWORD, CORS_ORIGIN, etc.):
+nano deploy/cms.service
 
-→ 200 {"deleted": true}
+# Copiar e ativar:
+sudo cp deploy/cms.service /etc/systemd/system/cms.service
+sudo systemctl daemon-reload
+sudo systemctl enable cms
+sudo systemctl start cms
+
+# Verificar status:
+sudo systemctl status cms
+sudo journalctl -u cms -f
 ```
+
+#### 5. Nginx como reverse proxy
+
+```bash
+# Substitua SEU_DOMINIO_OU_IP no arquivo:
+nano deploy/nginx.conf
+
+# Ativar:
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/cms
+sudo ln -s /etc/nginx/sites-available/cms /etc/nginx/sites-enabled/cms
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+#### 6. HTTPS com Let's Encrypt
+
+```bash
+sudo certbot --nginx -d SEU_DOMINIO
+```
+
+#### 7. Firewall
+
+```bash
+sudo ufw allow 22
+sudo ufw allow 80
+sudo ufw allow 443
+sudo ufw enable
+# Porta 8080 NÃO deve ser pública — apenas Nginx acessa localmente
+```
+
+### Verificando o deploy
+
+```bash
+curl https://SEU_DOMINIO/health
+# {"status":"ok"}
+
+curl https://SEU_DOMINIO/api/users
+# [] ou lista de usuários
+```
+
+### Comandos úteis na KVM
+
+```bash
+# Reiniciar o serviço após atualizar o JAR:
+sudo systemctl restart cms
+
+# Ver logs em tempo real:
+sudo journalctl -u cms -f
+
+# Verificar se está rodando na porta 8080:
+ss -tlnp | grep 8080
+```
+
+---
+
+## Segurança — checklist de produção
+
+- [ ] Alterar `DB_PASSWORD` para uma senha forte
+- [ ] Definir `CORS_ORIGIN` com o domínio exato do Netlify (não `*`)
+- [ ] Habilitar firewall (UFW) — porta 8080 não deve ser pública
+- [ ] Habilitar HTTPS via Let's Encrypt
+- [ ] Configurar backup automático do PostgreSQL (`pg_dump`)
+- [ ] Adicionar autenticação JWT (não implementado nesta versão)
+
+---
+
+## Frontend relacionado
+
+O frontend Angular está em `../cms-headless-front`.
+Veja `../cms-headless-front/README.md` para instruções de deploy no Netlify.

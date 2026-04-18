@@ -265,9 +265,7 @@ public class ContentHandler implements HttpHandler {
      * if the server allows cross-origin requests.
      */
     private void handleCors(HttpExchange exchange) throws IOException {
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        JsonUtil.setCorsHeaders(exchange);
         exchange.sendResponseHeaders(204, -1);
     }
 }

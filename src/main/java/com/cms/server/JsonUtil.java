@@ -26,11 +26,14 @@ public class JsonUtil {
      *   2. Body — the actual data (your JSON)
      * You MUST send headers BEFORE the body.
      */
+    private static final String CORS_ORIGIN =
+        System.getenv().getOrDefault("CORS_ORIGIN", "*");
+
     public static void sendJson(HttpExchange exchange, int statusCode, String json) throws IOException {
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
 
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", CORS_ORIGIN);
 
         exchange.sendResponseHeaders(statusCode, bytes.length);
 
@@ -94,7 +97,7 @@ public class JsonUtil {
      * Call this at the start of every handler before branching on method.
      */
     public static void setCorsHeaders(HttpExchange exchange) {
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin",  "*");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin",  CORS_ORIGIN);
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }

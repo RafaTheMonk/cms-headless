@@ -1,0 +1,20 @@
+[Unit]
+Description=Headless CMS UCSal
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/cms
+ExecStart=/usr/bin/java -jar /opt/cms/headless-cms.jar
+Restart=on-failure
+RestartSec=10
+
+# Variáveis de ambiente — edite com seus valores reais
+Environment="DB_URL=jdbc:postgresql://localhost:5432/ucsal_cms"
+Environment="DB_USER=postgres"
+Environment="DB_PASSWORD=sua_senha_aqui"
+Environment="CORS_ORIGIN=https://seu-app.netlify.app"
+
+[Install]
+WantedBy=multi-user.target
