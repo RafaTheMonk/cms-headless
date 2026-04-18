@@ -69,7 +69,7 @@ export class LoginComponent {
     this.userService.getAll().subscribe({
       next: (users) => {
         const user = users.find(
-          u => u.email === this.form.value.email && (u as any).password === this.form.value.password
+          u => u.email === this.form.value.email && (u as any).passwordHash === this.form.value.password
         );
         if (user) {
           this.auth.login(user);
