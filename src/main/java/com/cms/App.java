@@ -5,6 +5,7 @@ import com.cms.db.Database;
 import com.cms.server.Router;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
 
 /**
  * Entry point for the Headless CMS.
@@ -29,10 +30,7 @@ public class App {
         // Register all API routes
         Router.registerRoutes(server);
 
-        // null = use the default executor (single-threaded)
-        // For production, swap to a thread pool:
-        //   server.setExecutor(Executors.newFixedThreadPool(10));
-        server.setExecutor(null);
+        server.setExecutor(Executors.newFixedThreadPool(10));
 
         server.start();
         System.out.println("=================================");
